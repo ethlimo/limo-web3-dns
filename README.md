@@ -4,10 +4,7 @@ limo-web3-dns is an experimental domain specific implementation of the DNS proto
 
 # Features
 
-[x] Vendor TXT record queries
-
-[ ] CNAME Record support
-
-[ ] A/AAAA Record support via ENSIP extension
-
-[ ] Unsolicited cryptographic signature implementation
+- [x] Vendor TXT record queries
+- [ ] CNAME Record support
+- [ ] A/AAAA Record support via ENSIP extension
+- [ ] Unsolicited cryptographic signature implementation
