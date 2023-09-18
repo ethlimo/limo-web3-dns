@@ -11,6 +11,7 @@ struct EthersAnswerProvider<T: Send + Sync> {
 
 //maybe these should be prepended by something?
 const ENS_RECORD_SERVICES: &[&'static str] = &[
+    "_atproto", //bsky
     "avatar",
     "description",
     "display",
