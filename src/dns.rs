@@ -6,16 +6,54 @@ use nom::{
 };
 use std::str::from_utf8;
 
+trait Parseable<T> {
+    fn parse(input: &[u8]) -> IResult<&[u8], T>;
+    fn serialize(&self) -> Vec<u8>;
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct DnsHeader {
     id: u16,
     flags: DnsFlags,
     qd_count: u16,
     an_count: u16,
+    ns_count: u16,
+    ar_count: u16,
+}
+
+impl Parseable<DnsHeader> for DnsHeader {
+    fn parse(input: &[u8]) -> IResult<&[u8], DnsHeader> {
+        let (input, id) = be_u16(input)?;
+        let (input, flags) = DnsFlags::parse(input)?;
+        let (input, qd_count) = be_u16(input)?;
+        let (input, an_count) = be_u16(input)?;
+        let (input, ns_count) = be_u16(input)?;
+        let (input, ar_count) = be_u16(input)?;
+        Ok((
+            input,
+            DnsHeader {
+                id,
+                flags,
+                qd_count,
+                an_count,
+                ns_count,
+                ar_count
+            },
+        ))
+    }
+    fn serialize(&self) -> Vec<u8> {
+        let mut header = Vec::new();
+        header.extend_from_slice(&self.id.to_be_bytes());
+        header.extend_from_slice(&self.flags.serialize());
+        header.extend_from_slice(&self.qd_count.to_be_bytes());
+        header.extend_from_slice(&self.an_count.to_be_bytes());
+        header.extend_from_slice(&[0u8; 4]);
+        header
+    }
 }
 
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Copy)]
 struct DnsFlags {
     qr: bool,      // Query/Response
     opcode: Opcode,  // Opcode
@@ -26,7 +64,34 @@ struct DnsFlags {
     rcode: RCode,   // Response Code
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Parseable<DnsFlags> for DnsFlags {
+    fn parse(input: &[u8]) -> IResult<&[u8], DnsFlags> {
+        let (input, flags) = be_u16(input)?;
+        Ok((input, DnsFlags {
+            qr: (flags & 0b1000000000000000) != 0,
+            opcode: Opcode::from((flags & 0b0111100000000000) >> 11),
+            aa: (flags & 0b0000010000000000) != 0,
+            tc: (flags & 0b0000001000000000) != 0,
+            rd: (flags & 0b0000000100000000) != 0,
+            ra: (flags & 0b0000000010000000) != 0,
+            rcode: RCode::from(flags & 0b0000000000001111),
+        }))
+    }
+    fn serialize(&self) -> Vec<u8> {
+        let mut flags: u16 = 0;
+        flags |= (self.qr as u16) << 15;
+        flags |= (u16::from(self.opcode) & 0b0000000000001111) << 11;
+        flags |= (self.aa as u16) << 10;
+        flags |= (self.tc as u16) << 9;
+        flags |= (self.rd as u16) << 8;
+        flags |= (self.ra as u16) << 7;
+        flags |= (u16::from(self.rcode)) & 0b0000000000001111;
+        flags.to_be_bytes().to_vec()
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 #[non_exhaustive]
 #[repr(u16)]
 enum Opcode {
@@ -34,16 +99,25 @@ enum Opcode {
     Other(u16),
 }
 
-impl Opcode {
-    fn to_u16(&self) -> u16 {
-        match self {
-            Opcode::Query => 0,
-            Opcode::Other(value) => *value,
+impl From<u16> for Opcode {
+    fn from(code: u16) -> Self {
+        match code {
+            0 => Opcode::Query,
+            _ => Opcode::Other(code),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl From<Opcode> for u16 {
+    fn from(code: Opcode) -> Self {
+        match code {
+            Opcode::Query => 0,
+            Opcode::Other(code) => code,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 #[non_exhaustive]
 #[repr(u16)]
 enum RCode {
@@ -53,42 +127,24 @@ enum RCode {
     Other(u16),
 }
 
-impl RCode {
-    fn to_u16(&self) -> u16 {
-        match self {
-            RCode::NoError => 0,
-            RCode::FormatError => 1,
-            RCode::ServerFailure => 2,
-            RCode::Other(value) => *value,
+impl From<u16> for RCode {
+    fn from(code: u16) -> Self {
+        match code {
+            0 => RCode::NoError,
+            1 => RCode::FormatError,
+            2 => RCode::ServerFailure,
+            _ => RCode::Other(code),
         }
     }
 }
-
-
-impl DnsFlags {
-    fn from_u16(flags: u16) -> Self {
-        DnsFlags {
-            qr: (flags & 0x8000) != 0,
-            opcode: Opcode::from(Opcode::Other((flags & 0x7800) >> 11)),
-            aa: (flags & 0x0400) != 0,
-            tc: (flags & 0x0200) != 0,
-            rd: (flags & 0x0100) != 0,
-            ra: (flags & 0x0080) != 0,
-            rcode: RCode::from(RCode::Other(flags & 0x000F)),
+impl From<RCode> for u16 {
+    fn from(code: RCode) -> Self {
+        match code {
+            RCode::NoError => 0,
+            RCode::FormatError => 1,
+            RCode::ServerFailure => 2,
+            RCode::Other(code) => code,
         }
-    }
-    fn to_u16(&self) -> u16 {
-        let mut flags = 0u16;
-        
-        if self.qr { flags |= 0x8000; }
-        flags |= (self.opcode.to_u16()) << 11;
-        if self.aa { flags |= 0x0400; }
-        if self.tc { flags |= 0x0200; }
-        if self.rd { flags |= 0x0100; }
-        if self.ra { flags |= 0x0080; }
-        flags |= self.rcode.to_u16();
-        
-        flags
     }
 }
 
@@ -102,22 +158,6 @@ pub struct DnsQuestion {
 #[async_trait]
 pub trait DnsAnswerProvider: Send + Sync {
     async fn get_answer_async(&self, question: DnsQuestion) -> Option<String>;
-}
-
-fn parse_dns_header(input: &[u8]) -> IResult<&[u8], DnsHeader> {
-    let (input, id) = be_u16(input)?;
-    let (input, flags) = be_u16(input)?;
-    let (input, qd_count) = be_u16(input)?;
-    let (input, _) = skip_6_bytes(input)?;
-
-    let parsed_flags = DnsFlags::from_u16(flags);
-
-    Ok((input, DnsHeader { id, flags: parsed_flags, qd_count, an_count: 0 }))
-}
-
-fn skip_6_bytes(input: &[u8]) -> IResult<&[u8], ()> {
-    let (input, _) = take(6usize)(input)?;
-    Ok((input, ()))
 }
 
 fn parse_dns_question(input: &[u8]) -> IResult<&[u8], DnsQuestion> {
@@ -160,7 +200,7 @@ fn parse_qname(mut input: &[u8]) -> IResult<&[u8], String> {
 fn serialize_dns_header(header: &DnsHeader) -> Vec<u8> {
     let mut response_packet = Vec::new();
     response_packet.extend_from_slice(&header.id.to_be_bytes());
-    response_packet.extend_from_slice(&(header.flags.to_u16()).to_be_bytes());
+    response_packet.extend_from_slice(&(header.flags.serialize().as_slice()));
     response_packet.extend_from_slice(&header.qd_count.to_be_bytes());
     response_packet.extend_from_slice(&header.an_count.to_be_bytes());
     response_packet.extend_from_slice(&[0u8; 4]);
@@ -204,6 +244,8 @@ async fn generate_dns_response_packet<P: DnsAnswerProvider>(
         flags,
         qd_count: questions.len() as u16,
         an_count: 0,
+        ar_count: 0,
+        ns_count: 0,
     };
 
     let mut response_packet = Vec::new();
@@ -268,7 +310,7 @@ fn parse_questions(
 }
 
 pub async fn handle_dns_packet<P: DnsAnswerProvider>(data: &[u8], answer_provider: &P) -> Vec<u8> {
-    match parse_dns_header(data) {
+    match DnsHeader::parse(data) {
         Ok((remaining_data, header)) => {
             println!("Parsed header: {:?}", header);
             let questions = if header.qd_count > 0 {
@@ -306,6 +348,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_dnsheader_serialize_idempotent() {
+        let header = DnsHeader {
+            id: 1,
+            flags: DnsFlags { qr: true, opcode: Opcode::Query, aa: false, tc: false, rd: false, ra: false, rcode: RCode::NoError },
+            qd_count: 0,
+            an_count: 0,
+            ar_count: 0,
+            ns_count: 0,
+        };
+        let serialized = header.serialize();
+        let parsed = DnsHeader::parse(&serialized).unwrap().1;
+        assert_eq!(header, parsed);
+    }
+
+    #[tokio::test]
+    async fn test_dnsheader_parse_idempotent()
+    {
+        let header = DnsHeader {
+            id: 1,
+            flags: DnsFlags { qr: true, opcode: Opcode::Query, aa: false, tc: false, rd: false, ra: false, rcode: RCode::NoError },
+            qd_count: 0,
+            an_count: 0,
+            ar_count: 0,
+            ns_count: 0,
+        };
+        let serialized = header.serialize();
+        let parsed = DnsHeader::parse(&serialized).unwrap().1;
+        assert_eq!(header, parsed);
+    }
+
+    #[tokio::test]
     async fn test_generate_dns_response_packet_zero_questions() {
         let questions = vec![];
         let answer_provider = DummyAnswerProvider;
@@ -316,6 +389,8 @@ mod tests {
                 flags: DnsFlags { qr: true, opcode: Opcode::Query, aa: false, tc: false, rd: false, ra: false, rcode: RCode::NoError },
                 qd_count: 0,
                 an_count: 0,
+                ar_count: 0,
+                ns_count: 0,
             },
             &answer_provider,
         )
@@ -340,6 +415,8 @@ mod tests {
                 flags: DnsFlags { qr: true, opcode: Opcode::Query, aa: false, tc: false, rd: false, ra: false, rcode: RCode::NoError },
                 qd_count: 1,
                 an_count: 0,
+                ar_count: 0,
+                ns_count: 0,
             },
             &answer_provider,
         )
