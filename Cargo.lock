@@ -1665,6 +1665,8 @@ dependencies = [
  "async-trait",
  "ethers",
  "nom",
+ "once_cell",
+ "punycode",
  "tokio",
 ]
 
@@ -2181,6 +2183,12 @@ checksum = "3d433d9f1a3e8c1263d9456598b16fec66f4acc9a74dacffd35c7bb09b3a1328"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "punycode"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9e1dcb320d6839f6edb64f7a4a59d39b30480d4d1765b56873f7c858538a5fe"
 
 [[package]]
 name = "quote"

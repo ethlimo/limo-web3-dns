@@ -1,16 +1,21 @@
+use dns::DnsName;
 use ethers::prelude::*;
 
 use async_trait::async_trait;
 use tokio::net::UdpSocket;
+use once_cell::sync::Lazy;
+
 
 mod dns;
+
 
 struct EthersAnswerProvider<T: Send + Sync> {
     provider: ethers::providers::Provider<T>,
 }
 
 //maybe these should be prepended by something?
-const ENS_RECORD_SERVICES: &[&'static str] = &[
+const ENS_RECORD_SERVICES: Lazy<Vec<DnsName>> = Lazy::new(|| {
+    vec![
     "_atproto", //bsky
     "avatar",
     "description",
@@ -27,22 +32,24 @@ const ENS_RECORD_SERVICES: &[&'static str] = &[
     "com.linkedin",
     "com.twitter",
     "io.keybase",
-    "org.telegram",
-];
+    "org.telegram"
+    ].iter().map(|x: &&'static str| DnsName::from(*x)).collect()
+});
 
 #[async_trait]
-impl<T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider for EthersAnswerProvider<T> {
-    async fn get_answer_async(&self, question: dns::DnsQuestion) -> Option<String> {
-        let svc = ENS_RECORD_SERVICES
+impl<'a, T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider<'a> for EthersAnswerProvider<T> {
+    async fn get_answer_async(&self, question: dns::DnsQuestion<'a>) -> Option<String> {
+        let binding = ENS_RECORD_SERVICES;
+        let svc = binding
             .iter()
-            .filter(|x| question.qname.starts_with(*x))
+            .filter(|x| question.qname.is_label_of(*x))
             .next();
         println!("{:?}", svc);
         match svc {
             Some(x) => {
                 let res = self
                     .provider
-                    .resolve_field(&question.qname.split_at(x.len() + 1).1, x)
+                    .resolve_field(&question.qname.remove_prefix_labels(x).unwrap().punycode_decode()?, &x.punycode_decode()?)
                     .await;
                 match res {
                     Ok(r) => if r.len() > 0 {
