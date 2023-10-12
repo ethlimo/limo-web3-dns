@@ -15,30 +15,32 @@ struct EthersAnswerProvider<T: Send + Sync> {
 
 //maybe these should be prepended by something?
 const ENS_RECORD_SERVICES: Lazy<Vec<DnsName>> = Lazy::new(|| {
-    vec![
-    "_atproto", //bsky
-    "avatar",
-    "description",
-    "display",
-    "email",
-    "keywords",
-    "mail",
-    "notice",
-    "location",
-    "phone",
-    "url",
-    "com.github",
-    "com.peepeth",
-    "com.linkedin",
-    "com.twitter",
-    "io.keybase",
-    "org.telegram"
-    ].iter().map(|x: &&'static str| DnsName::from(*x)).collect()
+    let v: Vec<String> = vec![
+    "_atproto".to_string(), //bsky
+    "avatar".to_string(),
+    "description".to_string(),
+    "display".to_string(),
+    "email".to_string(),
+    "keywords".to_string(),
+    "mail".to_string(),
+    "notice".to_string(),
+    "location".to_string(),
+    "phone".to_string(),
+    "url".to_string(),
+    "com.github".to_string(),
+    "com.peepeth".to_string(),
+    "com.linkedin".to_string(),
+    "com.twitter".to_string(),
+    "io.keybase".to_string(),
+    "org.telegram".to_string()
+    ];
+    
+    v.iter().map(|x| DnsName::from(x.to_string())).collect()
 });
 
 #[async_trait]
-impl<'a, T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider<'a> for EthersAnswerProvider<T> {
-    async fn get_answer_async(&self, question: dns::DnsQuestion<'a>) -> Option<String> {
+impl<'a, T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider for EthersAnswerProvider<T> {
+    async fn get_answer_async(&self, question: dns::DnsQuestion) -> Option<String> {
         let binding = ENS_RECORD_SERVICES;
         let svc = binding
             .iter()
@@ -84,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (size, src) = socket.recv_from(&mut buf).await?;
         let data = &buf[0..size];
 
-        let response_packet = dns::handle_dns_packet(data, &answer_provider).await;
+        let response_packet = dns::handle_dns_packet(data.to_vec(), &answer_provider).await;
 
         if !response_packet.is_empty() {
             socket.send_to(&response_packet, &src).await?;
