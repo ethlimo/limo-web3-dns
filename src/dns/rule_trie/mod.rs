@@ -186,11 +186,11 @@ mod Test {
         trie.insert("foo.bar".to_string().into(), 3).unwrap();
         trie.insert("*.foo.xyz".to_string().into(), 69).unwrap();
         trie.insert("*.*.foo.xyz".to_string().into(), 420).unwrap();
+        trie.insert("*.zxcv.foo.xyz".to_string().into(), 1337).unwrap();
+        trie.insert("*.*.xyz".to_string().into(), 80000).unwrap();
         assert_eq!(trie.get("foo.bar.baz".to_string().into()), Some(&1));
         assert_eq!(trie.get("asdf_wildcard_test.foo.xyz".to_string().into()), Some(&69));
         assert_eq!(trie.get("asdf_wildcard_test.asdf.foo.xyz".to_string().into()), Some(&420));
+        assert_eq!(trie.get("asdf_wildcard_test.zxcv.foo.xyz".to_string().into()), Some(&1337));
     }
-
-
-
 }
