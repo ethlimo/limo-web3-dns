@@ -68,7 +68,6 @@ async fn generate_dns_response_packet<'a, P: DnsAnswerProvider>(
             let qname_bytes = DnsName::serialize(&question.qname);
             let qclass:u16 = 1; // IN (Internet)
             let ttl:u32 = 300;
-
             if question.qtype == 16 {
                 let qtype: u16 = 16; // TXT
                 let txt_data = answer.as_bytes();
