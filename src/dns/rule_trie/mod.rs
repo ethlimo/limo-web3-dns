@@ -17,7 +17,17 @@ struct RuleTrieKeyString {
 
 impl<'a> From<String> for RuleTrieKeyString {
     fn from(string: String) -> Self {
-        let keys = string.split('.').map(|x| RuleTrieKey::Label(DnsLabel::from(x.to_string()))).collect();
+        let keys = string.split('.').map(|x| (false, x)).map(|(stop_processing_wildcards, x)| {
+            
+            let mut nextStopProcessingWildcards = stop_processing_wildcards;
+            let new_label = if x == "*" && !stop_processing_wildcards {
+                RuleTrieKey::Wildcard
+            } else {
+                nextStopProcessingWildcards = true;
+                RuleTrieKey::Label(DnsLabel::from(x.to_string()))
+            };
+            (nextStopProcessingWildcards, new_label)
+        }).map(|(_b, x)| x).collect::<Vec<RuleTrieKey>>();
         RuleTrieKeyString { keys }
     }
 }
@@ -89,7 +99,7 @@ impl<'a, T> RuleTrieNode<T> {
 #[derive(Debug, PartialEq, Eq)]
 pub struct RuleTrie<T>(HashMap<RuleTrieKey, RuleTrieNode<T>>);
 
-impl<T> RuleTrie<T> {
+impl<T> RuleTrie<T> where T: std::fmt::Debug {
     pub fn new() -> Self {
         RuleTrie(HashMap::new())
     }
@@ -136,7 +146,16 @@ impl<T> RuleTrie<T> {
         let keyfrag = key.left_pop_clone();
         match keyfrag {
             Some((key_left_frag, keyfrag)) => {
-                let node = self.0.get(&key_left_frag);
+                println!("key_left_frag: {:?}", key_left_frag);
+                let node = if self.0.contains_key(&key_left_frag) {
+                    self.0.get(&key_left_frag)
+                } else {
+                    match self.0.get(&RuleTrieKey::Wildcard) {
+                        Some(node) => Some(node),
+                        None => self.0.get(&key_left_frag),
+                    }
+                };
+                println!("node: {:?}", node);
                 match node {
                     Some(node) => {
                         match node {
@@ -144,6 +163,7 @@ impl<T> RuleTrie<T> {
                             RuleTrieNode::Elem(elem) => Some(elem),
                             RuleTrieNode::None => None,
                         }
+                        
                     }
                     None => None,
                 }
@@ -165,9 +185,10 @@ mod Test {
         trie.insert("foo.bar.qux".to_string().into(), 2).unwrap();
         trie.insert("foo.bar".to_string().into(), 3).unwrap();
         trie.insert("*.foo.xyz".to_string().into(), 69).unwrap();
-        println!("{:#?}", trie);
+        trie.insert("*.*.foo.xyz".to_string().into(), 420).unwrap();
         assert_eq!(trie.get("foo.bar.baz".to_string().into()), Some(&1));
-        assert_eq!(trie.get("asdf_wildcard_test.bar.xyz".to_string().into()), Some(&69));
+        assert_eq!(trie.get("asdf_wildcard_test.foo.xyz".to_string().into()), Some(&69));
+        assert_eq!(trie.get("asdf_wildcard_test.asdf.foo.xyz".to_string().into()), Some(&420));
     }
 
 
