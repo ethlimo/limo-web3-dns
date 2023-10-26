@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 use ethers::providers::ProviderError;
 use ipnet::AddrParseError;
@@ -58,6 +58,64 @@ fn serialize_dns_question(question: &DnsQuestion) -> Vec<u8> {
     serialized
 }
 
+struct HandleIp4Ip6Ret {
+    answers: u16,
+    response_packet: Vec<u8>,
+}
+
+trait SelectCorrectMultiAddrProtocol<T> {
+    fn select_protocol<'a>(p: Protocol<'a>) -> Option<Protocol<'a>>;
+}
+
+impl SelectCorrectMultiAddrProtocol<Ipv4Addr> for Ipv4Addr {
+    fn select_protocol<'a>(p: Protocol<'a>) -> Option<Protocol<'a>> {
+        match p {
+            Protocol::Ip4(x) => Some(Protocol::Ip4(x)),
+            _ => None,
+        }
+    }
+}
+impl SelectCorrectMultiAddrProtocol<Ipv6Addr> for Ipv6Addr {
+    fn select_protocol<'a>(p: Protocol<'a>) -> Option<Protocol<'a>> {
+        match p {
+            Protocol::Ip6(x) => Some(Protocol::Ip6(x)),
+            _ => None,
+        }
+    }
+}
+fn handle_ip4_ip6_question<T>(_question: &DnsQuestion, answer: String) -> HandleIp4Ip6Ret
+where T: SelectCorrectMultiAddrProtocol<T> {
+    let mut response_packet: Vec<u8> = Vec::new();
+    let multiaddr_ip_query = answer.parse::<Multiaddr>().map_err(DnsError::from).and_then(|x: Multiaddr| -> Result<Protocol, DnsError> {
+        if x.len() < 2 {
+            return Err(DnsError::InvalidMultiaddr(None))
+        }
+        let v = x.into_iter().next().ok_or_else(|| DnsError::InvalidMultiaddr(None))?;
+        match T::select_protocol(v) {
+            Some(x) => Ok(x.acquire()),
+            None => Err(DnsError::InvalidMultiaddr(None))
+        }
+    });
+    match multiaddr_ip_query {
+        Ok(Protocol::Ip4(ip)) => {
+            let rd_length:u16 = 4;
+            response_packet.extend_from_slice(&rd_length.to_be_bytes());
+            response_packet.extend_from_slice(&ip.octets());
+            HandleIp4Ip6Ret { answers: 1, response_packet }
+        },
+        Ok(Protocol::Ip6(ip)) => {
+            let rd_length:u16 = 16;
+            response_packet.extend_from_slice(&rd_length.to_be_bytes());
+            response_packet.extend_from_slice(&ip.octets());
+            HandleIp4Ip6Ret { answers: 1, response_packet }
+        }
+        _ => {
+            HandleIp4Ip6Ret { answers: 0, response_packet }
+        }
+
+    }
+}
+
 async fn generate_dns_response_packet<'a, P: DnsAnswerProvider>(
     questions: Vec<DnsQuestion>,
     original_header: DnsHeader,
@@ -110,41 +168,21 @@ async fn generate_dns_response_packet<'a, P: DnsAnswerProvider>(
                 response_packet.extend_from_slice(txt_data);
             }
             else if question.qtype == 1 { //A record
-                let qtype: u16 = 1; // A
-                let raw_ip_query = ipnet::Ipv4Net::from_str(&answer).map(|x| {
-                    multiaddr::Protocol::Ip4(x.addr())
-                });
-                let multiaddr_ip_query = answer.parse::<Multiaddr>().map_err(DnsError::from).and_then(|x: Multiaddr| -> Result<Protocol, DnsError> {
-                    if x.len() < 2 {
-                        return Err(DnsError::InvalidMultiaddr(None))
-                    }
-                    let proto = x.into_iter().next().ok_or_else(|| DnsError::InvalidMultiaddr(None))?;
-                    match proto {
-                        multiaddr::Protocol::Ip4(ip) => {
-                            Ok(Protocol::Ip4(ip))
-                        }
-                        _ => {
-                            Err(DnsError::InvalidMultiaddr(None))
-                        }
-                    }
-                });
-                let ip = raw_ip_query.map_err(DnsError::from).or_else(|_x| multiaddr_ip_query);
-                match ip {
-                    Ok(Protocol::Ip4(ip)) => {
-                        let rd_length: u16 = 4;
-                        header.an_count += 1;
-                        response_packet.extend_from_slice(&qname_bytes);
-                        response_packet.extend_from_slice(&qtype.to_be_bytes());
-                        response_packet.extend_from_slice(&qclass.to_be_bytes());
-                        response_packet.extend_from_slice(&ttl.to_be_bytes());
-                        response_packet.extend_from_slice(&rd_length.to_be_bytes());
-                        response_packet.extend_from_slice(&ip.octets());
-                    }
-                    _ => {
-                    }
-                }
+                response_packet.extend_from_slice(&qname_bytes);
+                response_packet.extend_from_slice(&question.qtype.to_be_bytes());
+                response_packet.extend_from_slice(&qclass.to_be_bytes());
+                response_packet.extend_from_slice(&ttl.to_be_bytes());
+                let ret = handle_ip4_ip6_question::<Ipv4Addr>(question, answer);
+                header.an_count += ret.answers;
+                response_packet.extend_from_slice(&ret.response_packet);
             } else if question.qtype == 28 { //AAAA record
-
+                response_packet.extend_from_slice(&qname_bytes);
+                response_packet.extend_from_slice(&question.qtype.to_be_bytes());
+                response_packet.extend_from_slice(&qclass.to_be_bytes());
+                response_packet.extend_from_slice(&ttl.to_be_bytes());
+                let ret = handle_ip4_ip6_question::<Ipv6Addr>(question, answer);
+                header.an_count += ret.answers;
+                response_packet.extend_from_slice(&ret.response_packet);
             }
         }
     }
