@@ -6,12 +6,12 @@ use super::proto::DnsLabel;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 #[allow(dead_code)]
-enum RuleTrieKey {
+pub enum RuleTrieKey {
     Label(DnsLabel),
     Wildcard
 }
 #[allow(dead_code)]
-struct RuleTrieKeyString {
+pub struct RuleTrieKeyString {
     keys: Vec<RuleTrieKey>,
 }
 
@@ -19,20 +19,21 @@ impl<'a> From<String> for RuleTrieKeyString {
     fn from(string: String) -> Self {
         let keys = string.split('.').map(|x| (false, x)).map(|(stop_processing_wildcards, x)| {
             
-            let mut nextStopProcessingWildcards = stop_processing_wildcards;
+            let mut next_stop_processing_wildcards = stop_processing_wildcards;
             let new_label = if x == "*" && !stop_processing_wildcards {
                 RuleTrieKey::Wildcard
             } else {
-                nextStopProcessingWildcards = true;
+                next_stop_processing_wildcards = true;
                 RuleTrieKey::Label(DnsLabel::from(x.to_string()))
             };
-            (nextStopProcessingWildcards, new_label)
+            (next_stop_processing_wildcards, new_label)
         }).map(|(_b, x)| x).collect::<Vec<RuleTrieKey>>();
         RuleTrieKeyString { keys }
     }
 }
 
 impl RuleTrieKeyString {
+    #[allow(dead_code)]
     pub fn left_pop_clone(&self) -> Option<(RuleTrieKey, RuleTrieKeyString)> {
         if self.keys.len() == 0 {
             return None;
@@ -103,6 +104,7 @@ impl<T> RuleTrie<T> where T: std::fmt::Debug {
     pub fn new() -> Self {
         RuleTrie(HashMap::new())
     }
+    #[allow(dead_code)]
     pub fn insert(&mut self, key: RuleTrieKeyString, value: T) -> Result<(), Box<dyn Error>> {
         let keyfrag = key.left_pop_clone();
         match keyfrag {
@@ -142,6 +144,7 @@ impl<T> RuleTrie<T> where T: std::fmt::Debug {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, key: RuleTrieKeyString) -> Option<&T> {
         let keyfrag = key.left_pop_clone();
         match keyfrag {
@@ -174,7 +177,8 @@ impl<T> RuleTrie<T> where T: std::fmt::Debug {
 }
 
 
-mod Test {
+mod test {
+    #[allow(unused_imports)]
     use super::*;
     
     #[test]

@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use tokio::net::UdpSocket;
 use once_cell::sync::Lazy;
 
+use crate::dns::DnsError;
+
 
 mod dns;
 
@@ -42,30 +44,46 @@ const ENS_RECORD_SERVICES: Lazy<Vec<DnsName>> = Lazy::new(|| {
 impl<'a, T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider for EthersAnswerProvider<T> {
     async fn get_answer_async(&self, question: dns::DnsQuestion) -> Option<String> {
         let binding = ENS_RECORD_SERVICES;
-        let svc = binding
-            .iter()
-            .filter(|x| x.is_label_of(&question.qname))
-            .next();
+        let svcname_dnsrecord_a = DnsName::from("A".to_string());
+        let svcname_dnsrecord_aaaa = DnsName::from("AAAA".to_string());
+
+        let svc: Option<&DnsName> = match question.qtype {
+            1 => {
+                Some(&svcname_dnsrecord_a)
+            },
+            28 => {
+                Some(&svcname_dnsrecord_aaaa)
+            },
+            _ => { 
+                binding
+                .iter()
+                .filter(|x| x.is_label_of(&question.qname))
+                .next()
+            }  
+        };
+        
+        
         println!("svc {:?}", svc);
-        match svc {
+        let res = match svc {
             Some(x) => {
-                let res = self
+                let name = question.qname.clone().remove_prefix_labels(x).or(Some(question.qname.clone()))?;
+                self
                     .provider
-                    .resolve_field(&question.qname.remove_prefix_labels(x).unwrap().punycode_decode()?, &x.punycode_decode()?)
-                    .await;
-                match res {
-                    Ok(r) => if r.len() > 0 {
-                        Some(r)
-                    } else {
-                        None
-                    },
-                    Err(e) => {
-                        println!("error resolving {:?} {:?} {:?}", x, question.qname, e);
-                        None
-                    }
-                }
+                    .resolve_field(&name.punycode_decode()?, &x.punycode_decode()?)
+                    .await.map_err(DnsError::from)
             }
-            None => None,
+            None => Err(DnsError::ErrNoServiceTypeRecognized)
+        };
+        match res {
+            Ok(r) => if r.len() > 0 {
+                Some(r)
+            } else {
+                None
+            },
+            Err(e) => {
+                println!("error resolving {:?} {:?}", question.qname, e);
+                None
+            }
         }
     }
 }
@@ -77,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Listening on: {}", socket.local_addr()?);
 
     let answer_provider = EthersAnswerProvider {
-        provider: ethers::providers::test_provider::MAINNET.provider(),
+        provider: ethers::providers::test_provider::SEPOLIA.provider(),
     };
 
     let mut buf = [0u8; 1024];

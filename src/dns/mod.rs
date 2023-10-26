@@ -1,3 +1,8 @@
+use std::str::FromStr;
+
+use ethers::providers::ProviderError;
+use ipnet::AddrParseError;
+use multiaddr::{Multiaddr, Protocol};
 use nom::{
     number::complete::be_u16,
     IResult,
@@ -7,6 +12,30 @@ pub use self::proto::{DnsQuestion, DnsName, DnsAnswerProvider, DnsHeader, DnsFla
 
 mod proto;
 pub mod rule_trie;
+
+#[derive(Debug)]
+pub enum DnsError {
+    InvalidMultiaddr(Option<multiaddr::Error>),
+    InvalidAddress(AddrParseError),
+    EthersProviderError(ProviderError),
+    ErrNoServiceTypeRecognized,
+}
+
+impl From<multiaddr::Error> for DnsError {
+    fn from(err: multiaddr::Error) -> Self {
+        DnsError::InvalidMultiaddr(Some(err))
+    }
+}
+impl From<AddrParseError> for DnsError {
+    fn from(err: AddrParseError) -> Self {
+        DnsError::InvalidAddress(err)
+    }
+}
+impl From<ProviderError> for DnsError {
+    fn from(err: ProviderError) -> Self {
+        DnsError::EthersProviderError(err)
+    }
+}
 
 fn parse_dns_question(input: &[u8]) -> IResult<&[u8], DnsQuestion> {
     let (input, qname) = DnsName::parse(input)?;
@@ -64,15 +93,14 @@ async fn generate_dns_response_packet<'a, P: DnsAnswerProvider>(
         let ans = answer_provider.get_answer_async(question.clone()).await;
         println!("ans {:?}", ans);
         if let Some(answer) = ans {
-            header.an_count += 1;
             let qname_bytes = DnsName::serialize(&question.qname);
             let qclass:u16 = 1; // IN (Internet)
-            let ttl:u32 = 300;
+            let ttl:u32 = 300; //TODO
             if question.qtype == 16 {
+                header.an_count += 1;
                 let qtype: u16 = 16; // TXT
                 let txt_data = answer.as_bytes();
                 let rd_length: u16 = (txt_data.len() + 1) as u16; // +1 for the TXT length byte
-            
                 response_packet.extend_from_slice(&qname_bytes);
                 response_packet.extend_from_slice(&qtype.to_be_bytes());
                 response_packet.extend_from_slice(&qclass.to_be_bytes());
@@ -81,8 +109,42 @@ async fn generate_dns_response_packet<'a, P: DnsAnswerProvider>(
                 response_packet.push(txt_data.len() as u8);
                 response_packet.extend_from_slice(txt_data);
             }
-            else if question.qtype == 1 {
-                //TODO: figure a scheme for handling A records?
+            else if question.qtype == 1 { //A record
+                let qtype: u16 = 1; // A
+                let raw_ip_query = ipnet::Ipv4Net::from_str(&answer).map(|x| {
+                    multiaddr::Protocol::Ip4(x.addr())
+                });
+                let multiaddr_ip_query = answer.parse::<Multiaddr>().map_err(DnsError::from).and_then(|x: Multiaddr| -> Result<Protocol, DnsError> {
+                    if x.len() < 2 {
+                        return Err(DnsError::InvalidMultiaddr(None))
+                    }
+                    let proto = x.into_iter().next().ok_or_else(|| DnsError::InvalidMultiaddr(None))?;
+                    match proto {
+                        multiaddr::Protocol::Ip4(ip) => {
+                            Ok(Protocol::Ip4(ip))
+                        }
+                        _ => {
+                            Err(DnsError::InvalidMultiaddr(None))
+                        }
+                    }
+                });
+                let ip = raw_ip_query.map_err(DnsError::from).or_else(|_x| multiaddr_ip_query);
+                match ip {
+                    Ok(Protocol::Ip4(ip)) => {
+                        let rd_length: u16 = 4;
+                        header.an_count += 1;
+                        response_packet.extend_from_slice(&qname_bytes);
+                        response_packet.extend_from_slice(&qtype.to_be_bytes());
+                        response_packet.extend_from_slice(&qclass.to_be_bytes());
+                        response_packet.extend_from_slice(&ttl.to_be_bytes());
+                        response_packet.extend_from_slice(&rd_length.to_be_bytes());
+                        response_packet.extend_from_slice(&ip.octets());
+                    }
+                    _ => {
+                    }
+                }
+            } else if question.qtype == 28 { //AAAA record
+
             }
         }
     }
@@ -219,4 +281,5 @@ mod tests {
         // Header + serialized question + serialized answer
         assert!(packet.len() > 12);
     }
+
 }
