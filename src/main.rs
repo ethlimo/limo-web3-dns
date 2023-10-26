@@ -44,9 +44,9 @@ impl<'a, T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider for EthersAnswer
         let binding = ENS_RECORD_SERVICES;
         let svc = binding
             .iter()
-            .filter(|x| question.qname.is_label_of(*x))
+            .filter(|x| x.is_label_of(&question.qname))
             .next();
-        println!("{:?}", svc);
+        println!("svc {:?}", svc);
         match svc {
             Some(x) => {
                 let res = self
@@ -73,7 +73,7 @@ impl<'a, T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider for EthersAnswer
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let socket = UdpSocket::bind("0.0.0.0:5353").await?;
+    let socket = UdpSocket::bind("0.0.0.0:42000").await?;
     println!("Listening on: {}", socket.local_addr()?);
 
     let answer_provider = EthersAnswerProvider {

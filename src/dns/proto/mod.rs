@@ -158,9 +158,10 @@ impl<'a> DnsLabel {
     pub fn punycode_decode(&self) -> Option<String> {
         if self.label.len() >= 4 && &self.label[0..4] == b"xn--" {
             let decoded = punycode::decode(String::from_utf8(self.label[4..].to_vec()).ok()?.as_str()).ok()?;
+            println!("{:?}", decoded);
             Some(decoded)
         } else {
-            String::from_utf8(self.serialize().to_vec()).ok()
+            String::from_utf8(self.label.to_vec()).ok()
         }
     }
 }
@@ -217,7 +218,8 @@ impl<'a> DnsName {
     }
 
     pub fn remove_prefix_labels(&self, prefix: &DnsName) -> Option<DnsName> {
-        if !self.is_label_of(prefix) {
+        if !prefix.is_label_of(self) {
+            println!("not label of");
             return None;
         }
         let mut self_iter = self.labels.iter();
