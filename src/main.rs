@@ -1,3 +1,4 @@
+use clap::Parser;
 use dns::DnsName;
 use ethers::prelude::*;
 
@@ -9,7 +10,7 @@ use crate::dns::DnsError;
 
 
 mod dns;
-
+mod cli;
 
 struct EthersAnswerProvider<T: Send + Sync> {
     provider: ethers::providers::Provider<T>,
@@ -54,12 +55,12 @@ impl<'a, T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider for EthersAnswer
             28 => {
                 Some(&svcname_dnsrecord_aaaa)
             },
-            _ => { 
+            _ => {
                 binding
                 .iter()
                 .filter(|x| x.is_label_of(&question.qname))
                 .next()
-            }  
+            }
         };
         
         
@@ -91,11 +92,18 @@ impl<'a, T: Send + Sync + JsonRpcClient> dns::DnsAnswerProvider for EthersAnswer
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let socket = UdpSocket::bind("0.0.0.0:42000").await?;
+    let opts = cli::Opts::parse();
+    let resolved_opts = cli::ResolvedOpts::<ethers::providers::Http>::try_from(opts)?;
+
+    let socket = UdpSocket::bind(resolved_opts.udp_bind).await?;
     println!("Listening on: {}", socket.local_addr()?);
 
+    let block_time = resolved_opts.provider.get_block(BlockNumber::Latest).await?.map(|block| block.timestamp);
+    let chain_id = resolved_opts.provider.get_chainid().await?;
+
+    println!("Current block time: {:?}, Chain ID: {:?}", block_time.unwrap(), chain_id);
     let answer_provider = EthersAnswerProvider {
-        provider: ethers::providers::test_provider::SEPOLIA.provider(),
+        provider: resolved_opts.provider
     };
 
     let mut buf = [0u8; 1024];
