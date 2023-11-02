@@ -6,5 +6,5 @@ limo-web3-dns is an experimental domain specific implementation of the DNS proto
 
 - [x] Vendor TXT record queries
 - [ ] CNAME Record support
-- [ ] A/AAAA Record support via ENSIP extension
+- [x] A/AAAA Record support via multiaddr records
 - [ ] Unsolicited cryptographic signature implementation
